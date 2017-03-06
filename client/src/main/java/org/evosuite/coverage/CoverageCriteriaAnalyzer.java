@@ -297,8 +297,8 @@ public class CoverageCriteriaAnalyzer {
         }
         
         if (Properties.COVERAGE_MATRIX) {
-            writeCoverageMatrix(coverage_matrix, criterion, goals.size(), testSuiteCopy.getFitness());
-            writeFitnessMatrix(fitness_matrix, criterion, goals.size(), testSuiteCopy.getFitness());
+            writeCoverageMatrix(coverage_matrix, criterion, goals.size(), testSuiteCopy.getFitness(), testSuiteCopy.size());
+            writeFitnessMatrix(fitness_matrix, criterion, goals.size(), testSuiteCopy.getFitness(), testSuiteCopy.size());
         }
 
         coverageBitString.put(criterion.name(), buffer);
@@ -398,9 +398,9 @@ public class CoverageCriteriaAnalyzer {
         }
     }
     
-    private static void writeCoverageMatrix(boolean[][] coverage, Properties.Criterion criterion, int goalsize, double fitness) {
+    private static void writeCoverageMatrix(boolean[][] coverage, Properties.Criterion criterion, int goalsize, double fitness, int suiteSize) {
         StringBuilder suite = new StringBuilder();
-        suite.append(fitness + "\n");
+        suite.append(fitness + "," + suiteSize + "\n");
         
         suite.append("t");
 
@@ -429,9 +429,9 @@ public class CoverageCriteriaAnalyzer {
                         File.separator + criterion.toString().toLowerCase() + "." + Properties.COVERAGE_MATRIX_FILENAME));
     }
 
-    private static void writeFitnessMatrix(double[][] coverage, Properties.Criterion criterion, int goalsize, double fitness) {
+    private static void writeFitnessMatrix(double[][] coverage, Properties.Criterion criterion, int goalsize, double fitness, int suiteSize) {
         StringBuilder suite = new StringBuilder();
-        suite.append(fitness + "\n");
+        suite.append(fitness + "," + suiteSize + "\n");
         
         suite.append("t");
 
