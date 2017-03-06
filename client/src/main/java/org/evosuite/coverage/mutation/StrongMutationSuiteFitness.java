@@ -149,7 +149,7 @@ public class StrongMutationSuiteFitness extends MutationSuiteFitness {
 
 			for(Integer mutantId : trace.getTouchedMutants()) {
 				// Only mutants not in the archive yet
-				if(newKilled.contains(mutantId) || !mutants.contains(mutantId) || removedMutants.contains(mutantId))
+				if(!mutants.contains(mutantId) || removedMutants.contains(mutantId))
 					continue;
 				MutationTestFitness mutantFitness = mutantMap.get(mutantId);
 
@@ -166,7 +166,7 @@ public class StrongMutationSuiteFitness extends MutationSuiteFitness {
 					double mutantFitnessValue = mutantFitness.getFitness(test, result);
 					minMutantFitness.put(mutantFitness.getMutation(),
 							Math.min(normalize(mutantFitnessValue), minMutantFitness.get(mutantFitness.getMutation())));
-					if (mutantFitnessValue == 0.0) {
+					if (!newKilled.contains(mutantId) && mutantFitnessValue == 0.0) {
 						result.test.addCoveredGoal(mutantFitness);
 						numKilled++;
 						newKilled.add(mutantId);
