@@ -24,6 +24,9 @@ package org.evosuite.coverage;
 
 import org.evosuite.Properties;
 import org.evosuite.Properties.Criterion;
+import org.evosuite.ga.FitnessFunction;
+import org.evosuite.coverage.mutation.MutationTestFitness;
+import org.evosuite.coverage.mutation.MutationTimeoutStoppingCondition;
 import org.evosuite.coverage.ambiguity.AmbiguityCoverageSuiteFitness;
 import org.evosuite.coverage.rho.RhoCoverageSuiteFitness;
 import org.evosuite.TestGenerationContext;
@@ -33,12 +36,16 @@ import org.evosuite.testcase.DefaultTestCase;
 import org.evosuite.testcase.TestChromosome;
 import org.evosuite.testcase.TestFitnessFunction;
 import org.evosuite.testcase.execution.ExecutionTracer;
+import org.evosuite.testcase.execution.ExecutionResult;
+import org.evosuite.testcase.execution.ExecutionTrace;
 import org.evosuite.testsuite.TestSuiteChromosome;
 import org.evosuite.utils.ArrayUtil;
 import org.evosuite.utils.LoggingUtils;
+import org.evosuite.utils.FileIOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.text.NumberFormat;
 import java.util.*;
 
@@ -236,8 +243,19 @@ public class CoverageCriteriaAnalyzer {
 
         StringBuffer buffer = new StringBuffer(goals.size());
         int covered = 0;
+        
+        List<TestChromosome> tests = testSuiteCopy.getTestChromosomes();
+        boolean[][] coverage_matrix = new boolean[testSuiteCopy.size()][goals.size()];
+	double[][] fitness_matrix = new double[testSuiteCopy.size()][goals.size()];
+        int index_goal = 0;
+
+	for (int i = 0; i < testSuiteCopy.size(); i++)
+            for (int j = 0; j < goals.size(); j++)
+                fitness_matrix[i][j] = 3.0;
 
         for (TestFitnessFunction goal : goals) {
+            boolean writeFitness = true;
+
             if (goal.isCoveredBy(testSuiteCopy)) {
                 logger.debug("Goal {} is covered", goal);
                 covered++;
@@ -248,6 +266,39 @@ public class CoverageCriteriaAnalyzer {
                 if (Properties.PRINT_MISSED_GOALS)
                     LoggingUtils.getEvoLogger().info(" - Missed goal {}", goal.toString());
             }
+
+            if (criterion == Properties.Criterion.MUTATION || criterion == Properties.Criterion.STRONGMUTATION) {
+                MutationTestFitness mgoal = (MutationTestFitness) goal;
+
+                for (int index_test = 0; index_test < testSuiteCopy.size(); index_test++) {
+                    TestChromosome test = tests.get(index_test);
+                    if (goal.isCovered(test))
+                        coverage_matrix[index_test][index_goal] = true;
+                    else
+                        coverage_matrix[index_test][index_goal] = false;
+                    
+                    ExecutionResult result = test.getLastExecutionResult();
+                    if (result.calledReflection()) {
+                        writeFitness = false;
+                    }
+
+                    ExecutionTrace trace = result.getTrace();
+                    if (trace.getTouchedMutants().contains(index_goal)) {
+                        double mutantInfectionDistance = trace.getMutationDistance(index_goal);
+                        if (writeFitness && mutantInfectionDistance == 0.0)
+                            fitness_matrix[index_test][index_goal] = FitnessFunction.normalize(mgoal.getFitness(test, result));
+                        else if (writeFitness)
+                            fitness_matrix[index_test][index_goal] = 1.0 + FitnessFunction.normalize(mutantInfectionDistance);
+                    }
+                }
+            }
+            
+            index_goal++;
+        }
+        
+        if (Properties.COVERAGE_MATRIX) {
+            writeCoverageMatrix(coverage_matrix, criterion, goals.size(), testSuiteCopy.getFitness());
+            writeFitnessMatrix(fitness_matrix, criterion, goals.size(), testSuiteCopy.getFitness());
         }
 
         coverageBitString.put(criterion.name(), buffer);
@@ -269,7 +320,6 @@ public class CoverageCriteriaAnalyzer {
             LoggingUtils.getEvoLogger().info("* Coverage of criterion " + criterion + ": 100% (no goals)");
             ClientServices.getInstance().getClientNode().trackOutputVariable(getCoverageVariable(criterion), 1.0);
         } else {
-
             ClientServices.getInstance().getClientNode().trackOutputVariable(
                     getCoverageVariable(criterion), (double) covered / (double) goals.size());
 
@@ -346,5 +396,72 @@ public class CoverageCriteriaAnalyzer {
                 logger.debug("Criterion not supported: " + criterion);
                 return null;
         }
+    }
+    
+    private static void writeCoverageMatrix(boolean[][] coverage, Properties.Criterion criterion, int goalsize, double fitness) {
+        StringBuilder suite = new StringBuilder();
+        suite.append(fitness + "\n");
+        
+        suite.append("t");
+
+        for (int j = 0; j < goalsize; j++)
+            suite.append("," + j);
+        suite.append("\n");
+        
+        for (int i = 0; i < coverage.length; i++) {
+            StringBuilder test = new StringBuilder();
+            test.append("" + i);
+            
+            for (int j = 0; j < coverage[i].length; j++) {
+                if (coverage[i][j])
+                    test.append(",1");
+                else
+                    test.append(",0");
+            }
+            
+            //if (!test.toString().contains("1"))
+            //    continue;
+            
+            suite.append(test + "\n");
+        }
+
+        FileIOUtils.writeFile(suite.toString(), new File(getReportDir().getAbsolutePath() +
+                        File.separator + criterion.toString().toLowerCase() + "." + Properties.COVERAGE_MATRIX_FILENAME));
+    }
+
+    private static void writeFitnessMatrix(double[][] coverage, Properties.Criterion criterion, int goalsize, double fitness) {
+        StringBuilder suite = new StringBuilder();
+        suite.append(fitness + "\n");
+        
+        suite.append("t");
+
+        for (int j = 0; j < goalsize; j++)
+            suite.append("," + j);
+        suite.append("\n");
+
+        for (int i = 0; i < coverage.length; i++) {
+            StringBuilder test = new StringBuilder();
+            test.append("" + i);
+
+            for (int j = 0; j < coverage[i].length; j++) {
+                test.append("," + coverage[i][j]);
+            }
+
+            suite.append(test + "\n");
+        }
+
+        FileIOUtils.writeFile(suite.toString(), new File(getReportDir().getAbsolutePath() +
+                        File.separator + criterion.toString().toLowerCase() + ".fitnessMatrix"));
+    }
+    
+    private static File getReportDir() throws RuntimeException {
+        File dir = new File(Properties.REPORT_DIR);
+    
+        if (!dir.exists()) {
+            if (!dir.mkdirs())
+                throw new RuntimeException("Cannot create report dir: " + Properties.REPORT_DIR);
+        }
+    
+        return dir;
     }
 }
