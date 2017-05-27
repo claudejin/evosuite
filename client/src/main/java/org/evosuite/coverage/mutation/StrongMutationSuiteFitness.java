@@ -29,6 +29,8 @@ import org.evosuite.testcase.execution.ExecutionTrace;
 import org.evosuite.testsuite.AbstractTestSuiteChromosome;
 import org.evosuite.testsuite.TestSuiteChromosome;
 
+import org.evosuite.utils.Matrix;
+
 import java.util.*;
 
 /**
@@ -98,6 +100,7 @@ public class StrongMutationSuiteFitness extends MutationSuiteFitness {
 
 		// Set<MutationTestFitness> uncoveredMutants = MutationTestPool.getUncoveredFitnessFunctions();
 		TestSuiteChromosome suite = (TestSuiteChromosome) individual;
+		final double weight = 1.0 * 2 / (mutationGoals.size() - 1);
 
 		for (TestChromosome test : suite.getTestChromosomes()) {
 			ExecutionResult result = test.getLastExecutionResult();
@@ -105,7 +108,7 @@ public class StrongMutationSuiteFitness extends MutationSuiteFitness {
 			if (result.hasTimeout()) {
 				logger.debug("Skipping test with timeout");
 				double fitness = branchFitness.totalBranches * 2
-				        + branchFitness.totalMethods + 3 * mutationGoals.size();
+				        + branchFitness.totalMethods + 3 * (mutationGoals.size() + weight * mutationGoals.size() * (mutationGoals.size() - 1) / 2);
 				updateIndividual(this, individual, fitness);
 				suite.setCoverage(this, 0.0);
 				logger.info("Test case has timed out, setting fitness to max value "
@@ -120,6 +123,7 @@ public class StrongMutationSuiteFitness extends MutationSuiteFitness {
 
 		Set<Integer> touchedMutants = new HashSet<Integer>();		
 		Map<Mutation, Double> minMutantFitness = new HashMap<Mutation, Double>();
+		Matrix mutantFitnessMatrix = new Matrix(suite.size(), mutationGoals.size(), 3.0);
 
 		// For each mutant that is not in the archive:
 		//   3    -> not covered
@@ -129,13 +133,15 @@ public class StrongMutationSuiteFitness extends MutationSuiteFitness {
 			MutationTestFitness mutantFitness = mutantMap.get(mutantId);
 			minMutantFitness.put(mutantFitness.getMutation(), 3.0);
 		}
-		
+
+
 		int mutantsChecked = 0;
 		int numKilled = removedMutants.size();
 		Set<Integer> newKilled = new HashSet<Integer>();
 
 		List<TestChromosome> executionOrder = prioritizeTests(suite); // Quicker tests first
 		for (TestChromosome test : executionOrder) {
+			int testId = executionOrder.indexOf(test);
 			ExecutionResult result = test.getLastExecutionResult();
 			// Using private reflection can lead to false positives
 			// that represent unrealistic behaviour. Thus, we only
@@ -164,8 +170,8 @@ public class StrongMutationSuiteFitness extends MutationSuiteFitness {
 				if (mutantInfectionDistance == 0.0) {
 					logger.debug("Executing test against mutant " + mutantFitness.getMutation());
 					double mutantFitnessValue = mutantFitness.getFitness(test, result);
-					minMutantFitness.put(mutantFitness.getMutation(),
-							Math.min(normalize(mutantFitnessValue), minMutantFitness.get(mutantFitness.getMutation())));
+					minMutantFitness.put(mutantFitness.getMutation(), Math.min(normalize(mutantFitnessValue), minMutantFitness.get(mutantFitness.getMutation())));
+					mutantFitnessMatrix.setValue(testId, mutantId, normalize(mutantFitnessValue));
 					if (!newKilled.contains(mutantId) && mutantFitnessValue == 0.0) {
 						result.test.addCoveredGoal(mutantFitness);
 						numKilled++;
@@ -178,8 +184,7 @@ public class StrongMutationSuiteFitness extends MutationSuiteFitness {
 					}
 				} else {
 					double mutantFitnessValue = 1.0 + normalize(mutantInfectionDistance);
-					minMutantFitness.put(mutantFitness.getMutation(),
-							Math.min(mutantFitnessValue, minMutantFitness.get(mutantFitness.getMutation())));
+					mutantFitnessMatrix.setValue(testId, mutantId, mutantFitnessValue);
 				}
 			}
 
@@ -189,6 +194,21 @@ public class StrongMutationSuiteFitness extends MutationSuiteFitness {
 		for (Double fit : minMutantFitness.values()) {
 			fitness += fit;
 		}
+		Matrix minMutantPairFitness = new Matrix(mutationGoals.size(), mutationGoals.size(), 3.0);
+		for (int t = 0; t < suite.size(); t++) {
+			for (int m1 = 0; m1 < mutationGoals.size(); m1++) {
+				for (int m2 = 0; m2 < mutationGoals.size(); m2++) {
+					if (m1 < m2)
+						continue;
+
+					double mutantPairDistance = 3 - Math.abs(mutantFitnessMatrix.getValue(t, m1) - mutantFitnessMatrix.getValue(t, m2));
+					minMutantPairFitness.updateMinValue(m1, m2, mutantPairDistance);
+					minMutantPairFitness.updateMinValue(m2, m1, 0);
+				}
+			}
+		}
+
+		fitness += weight * minMutantPairFitness.getWholeSum();
 		
 		logger.debug("Mutants killed: {}, Checked: {}, Goals: {})", numKilled, mutantsChecked, mutationGoals.size());
 		
